@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iOS Trust Wallet Bridge Test</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0d1117; color: #e6edf3; padding: 20px; max-width: 500px; margin: 0 auto; }
+  h2 { color: #f0883e; font-size: 18px; margin-bottom: 8px; }
+  p { color: #8b949e; font-size: 13px; margin-bottom: 20px; }
+  button { display: block; width: 100%; padding: 14px; margin-bottom: 12px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-green { background: #238636; color: #fff; }
+  .btn-blue  { background: #1f6feb; color: #fff; }
+  .btn-orange{ background: #d29922; color: #000; }
+  .btn-red   { background: #da3633; color: #fff; }
+  .btn-gray  { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+  .log { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 11px; min-height: 100px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #7ee787; margin-top: 20px; }
+  .label { font-size: 11px; color: #f0883e; text-transform: uppercase; letter-spacing: 0.08em; margin: 16px 0 6px; font-weight: 700; }
+  .note { font-size: 11px; color: #8b949e; margin-bottom: 8px; }
+  .divider { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<h2>🍎 iOS Trust Wallet Test</h2>
+<p>Bug Bounty PoC — Tobjosh<br>Open this in Trust Wallet iOS dApp browser</p>
+
+<div class="label">Step 1 — Detect Environment</div>
+<p class="note">Tap to check what wallet objects exist (no user action needed normally)</p>
+<button class="btn-blue" onclick="detect()">🔍 Detect Bridge Objects</button>
+
+<hr class="divider">
+
+<div class="label">Step 2 — Connect Wallet</div>
+<p class="note">Triggers eth_requestAccounts — note timing in ms</p>
+<button class="btn-green" onclick="connectWallet()">🔗 Connect Wallet</button>
+
+<hr class="divider">
+
+<div class="label">Step 3 — Read Address (Silent, no dialog)</div>
+<p class="note">After connecting, this should read address with ZERO dialog</p>
+<button class="btn-blue" onclick="silentRead()">👁️ Silent eth_accounts Read</button>
+
+<hr class="divider">
+
+<div class="label">Step 4 — Disconnect & Reconnect Test</div>
+<p class="note">Close TW app, reopen, come back to this page, tap reconnect</p>
+<button class="btn-orange" onclick="reconnectTest()">⚡ Return Visit Test (ms timing)</button>
+
+<hr class="divider">
+
+<div class="label">Step 5 — Chain Info (passive, no auth)</div>
+<button class="btn-gray" onclick="chainInfo()">⛓️ Get Chain ID</button>
+
+<hr class="divider">
+
+<div class="label">Full Log</div>
+<div class="log" id="log">Waiting for interaction...\n</div>
+
+<script>
+// ALL calls are user-initiated (button taps)
+// NO auto-execution on load — required for iOS
+
+const logEl = document.getElementById('log');
+function log(msg) {
+  const ts = new Date().toISOString().substr(11,12);
+  logEl.textContent += `[${ts}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(msg);
+}
+
+// Step 1 — Detect
+function detect() {
+  log('=== ENVIRONMENT DETECTION ===');
+  const checks = {
+    'window.ethereum':      window.ethereum,
+    'window.trustwallet':   window.trustwallet,
+    'window.trustProvider': window.trustProvider,
+    'window.aptos':         window.aptos,
+    'window.keplr':         window.keplr,
+    'window.solana':        window.solana,
+    'window.createPromise': window.createPromise,
+    'window.resolvePromise':window.resolvePromise,
+  };
+  for (const [k,v] of Object.entries(checks)) {
+    log(`${v !== undefined ? '✅' : '❌'} ${k}: ${typeof v}`);
+  }
+  if (window.ethereum) {
+    log(`isTrust: ${window.ethereum.isTrust}`);
+    log(`isTrustWallet: ${window.ethereum.isTrustWallet}`);
+    log(`isMetaMask: ${window.ethereum.isMetaMask}`);
+    log(`chainId: ${window.ethereum.chainId}`);
+    log(`selectedAddress: ${window.ethereum.selectedAddress}`);
+  }
+  log('--- Detection complete ---');
+}
+
+// Step 2 — Connect
+async function connectWallet() {
+  log('=== CONNECT (user tapped button) ===');
+  if (!window.ethereum) { log('❌ No ethereum provider'); return; }
+  try {
+    const t0 = performance.now();
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const ms = Math.round(performance.now() - t0);
+    log(`Connected in ${ms}ms`);
+    log(`Address: ${accounts[0]}`);
+    log(ms < 500
+      ? `🚨 ${ms}ms = NO DIALOG SHOWN (auto-approved!)`
+      : `✅ ${ms}ms = dialog was shown (user interaction)`);
+  } catch(e) {
+    log(e.code === 4001 ? '✅ User rejected dialog' : `Error: ${e.message}`);
+  }
+}
+
+// Step 3 — Silent read (no dialog)
+async function silentRead() {
+  log('=== SILENT eth_accounts READ ===');
+  if (!window.ethereum) { log('❌ No provider'); return; }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+    log(`Result: ${JSON.stringify(accounts)}`);
+    if (accounts.length > 0) {
+      log(`🚨 Address returned silently: ${accounts[0]}`);
+      log('No dialog. No permission prompt. Permanent read.');
+    } else {
+      log('Empty — not connected yet');
+    }
+  } catch(e) { log(`Error: ${e.message}`); }
+}
+
+// Step 4 — Return visit reconnect timing
+async function reconnectTest() {
+  log('=== RETURN VISIT RECONNECT TEST ===');
+  log('(Use this AFTER closing TW app and reopening)');
+  if (!window.ethereum) { log('❌ No provider'); return; }
+  try {
+    const t0 = performance.now();
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const ms = Math.round(performance.now() - t0);
+    log(`Reconnected in ${ms}ms`);
+    log(`Address: ${accounts[0]}`);
+    log(ms < 500
+      ? `🚨 ${ms}ms = AUTO-RECONNECT (no dialog on return visit!)`
+      : `✅ ${ms}ms = dialog shown on return visit`);
+  } catch(e) {
+    log(e.code === 4001 ? '✅ Rejected' : `Error: ${e.message}`);
+  }
+}
+
+// Step 5 — Chain info
+async function chainInfo() {
+  log('=== CHAIN INFO (passive) ===');
+  if (!window.ethereum) { log('❌ No provider'); return; }
+  try {
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+    log(`eth_chainId: ${chainId} (${parseInt(chainId,16)})`);
+    const netV = await window.ethereum.request({ method: 'net_version' });
+    log(`net_version: ${netV}`);
+    log('Chain info returned without auth = passive fingerprinting confirmed');
+  } catch(e) { log(`Error: ${e.message}`); }
+}
+
+// Safe load — just show a ready message, NO ethereum calls
+window.addEventListener('load', () => {
+  log('Page loaded in Trust Wallet iOS browser');
+  log(`Ethereum available: ${!!window.ethereum}`);
+  log('Tap buttons above to test — NO auto-execution on iOS');
+});
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
